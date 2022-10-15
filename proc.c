@@ -290,8 +290,6 @@ wait(int *status)
 
         *status = p->status;
 
-        cprintf("child p-status: %d\n", p->status);
-
 
         kfree(p->kstack);
         p->kstack = 0;
@@ -316,6 +314,53 @@ wait(int *status)
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
+}
+
+int
+waitpid(int pid_find, int *status)
+{
+    struct proc *p;
+    int match_p, pid;
+    struct proc *curproc = myproc();
+
+    acquire(&ptable.lock);
+    for(;;){
+
+        match_p = 0;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){ //  Looks through all children and checks for zombies
+            if(p->state == ZOMBIE && p->pid == pid_find){
+                // Found matching pid
+                match_p = 1;
+                pid = p->pid;
+
+                *status = p->status;
+
+                cprintf("child p-status: %d\n", p->status);
+
+
+                kfree(p->kstack);
+                p->kstack = 0;
+                freevm(p->pgdir);
+
+                p->pid = 0;
+                p->parent = 0;
+                p->name[0] = 0;
+                p->killed = 0;
+                p->state = UNUSED;
+                release(&ptable.lock);
+                return pid;
+            }
+        }
+
+        // No point waiting if we don't have any children.
+        if(curproc->killed && match_p){
+            release(&ptable.lock);
+            return -1;
+        }
+
+        // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+        sleep(curproc, &ptable.lock);  //DOC: wait-sleep
+    }
 }
 
 //PAGEBREAK: 42

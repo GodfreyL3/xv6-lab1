@@ -31,8 +31,6 @@ sys_wait(void)
 
     int ret = wait((int*)p);
 
-    cprintf("Status from sysproc: %d\n", *p);
-
     return ret;
 
 
@@ -121,4 +119,22 @@ sys_exitstat(void)
     }
     exitstat(status);
     return 0;
+}
+
+int
+sys_waitpid(void)
+{
+
+    char *p;
+    int pid_find;
+    int n = 0;
+    if(argint(0, &pid_find) < 0 || argptr(1, &p, n) < 0)
+        return -1;
+
+    int ret = waitpid(pid_find, (int*)p);
+
+    return ret;
+
+
+
 }
