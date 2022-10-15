@@ -270,7 +270,7 @@ exit(void)
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
-wait(void)
+wait(int *status)
 {
   struct proc *p;
   int havekids, pid;
@@ -280,16 +280,23 @@ wait(void)
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){ //  Looks through all children and checks for zombies
       if(p->parent != curproc)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
         // Found one.
         pid = p->pid;
+
+        *status = p->status;
+
+        cprintf("child p-status: %d\n", p->status);
+
+
         kfree(p->kstack);
         p->kstack = 0;
         freevm(p->pgdir);
+
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
@@ -545,8 +552,6 @@ exitstat(int status)
     struct proc *curproc = myproc();
     struct proc *p;
     int fd;
-
-    cprintf("exit: %d\n", status);   //  Debugging
 
     curproc->status = status;   //  Store status num
 

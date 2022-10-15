@@ -23,7 +23,20 @@ sys_exit(void)
 int
 sys_wait(void)
 {
-  return wait();
+
+    char *p;
+    int n = 0;
+    if(argptr(0, &p, n) < 0)
+        return -1;
+
+    int ret = wait((int*)p);
+
+    cprintf("Status from sysproc: %d\n", *p);
+
+    return ret;
+
+
+
 }
 
 int
@@ -104,7 +117,7 @@ sys_exitstat(void)
 
     if(argint(0, &status) < 0)
     {
-        exitstat(0);
+        exitstat(-1);
     }
     exitstat(status);
     return 0;
