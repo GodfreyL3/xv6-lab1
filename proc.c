@@ -89,6 +89,8 @@ found:
   p->state = EMBRYO;
   p->pid = nextpid++;
 
+  p->prior_val = -1;    //  Should be changed later down the line. Not sure what to init as yet
+
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -199,6 +201,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->prior_val = curproc->prior_val;   //  Child process gets same priority value as parent
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
