@@ -337,7 +337,6 @@ waitpid(int pid_find, int *status)
 
                 cprintf("child p-status: %d\n", p->status);
 
-
                 kfree(p->kstack);
                 p->kstack = 0;
                 freevm(p->pgdir);
