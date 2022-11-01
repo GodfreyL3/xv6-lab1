@@ -138,3 +138,15 @@ sys_waitpid(void)
 
 
 }
+
+int sys_updateprior(void)
+{
+    int update;
+
+    if(argint(0, &update) < 0)
+    {
+        return -1;  //  Return -1 for unsuccessful
+    }
+    updateprior(update);
+    return 0;
+}

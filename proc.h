@@ -52,6 +52,10 @@ struct proc {
 
   int status;                  // Holds exit status for proc (Lab 1)
   int prior_val;               // Holds priority value of process
+
+  int t_start;                 // Tracks CPU ticks in exec();
+  int t_end;                   //   CPU ticks in exit();
+  int t_burst;                 //   Ticks spent in RUNNING state
 };
 
 // Process memory is laid out contiguously, low addresses first:

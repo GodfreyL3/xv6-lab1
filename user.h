@@ -26,6 +26,7 @@ int uptime(void);
 int hello(void);    //  J.H.
 int exitstat(int);  //  Lab 1 Part A
 int waitpid(int, int*);  //  Lab 1 Part C
+int updateprior(int);   //  Lab 2
 
 
 // ulib.c

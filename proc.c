@@ -7,6 +7,9 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#define P_MAX 31
+#define P_MIN 1
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -67,7 +70,7 @@ myproc(void) {
 
 //PAGEBREAK: 32
 // Look in the process table for an UNUSED proc.
-// If found, change state to EMBRYO and initialize
+// If found, change state to EMBRYO and initialize (Embryo is another way to say "created"
 // state required to run in the kernel.
 // Otherwise return 0.
 static struct proc*
@@ -201,7 +204,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
-  np->prior_val = curproc->prior_val;   //  Child process gets same priority value as parent
+  np->prior_val = curproc->prior_val;   //  Child process inherits same priority value as parent
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -370,9 +373,9 @@ waitpid(int pid_find, int *status)
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
 //  - choose a process to run
-//  - swtch to start running that process
+//  - switch to start running that process
 //  - eventually that process transfers control
-//      via swtch back to the scheduler.
+//      via switch back to the scheduler.
 void
 scheduler(void)
 {
@@ -386,10 +389,39 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
 
+    struct proc *temp;  //  Will hold highest order process
+    temp->prior_val = 99;   //  Will always be replaced by the first process looped over in ptable
+
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        //  Filters out non-runnable processes and replaces if the proc priority is higher than temp's
+        if (p->state == RUNNABLE)
+        {
+            if(p->prior_val < temp->prior_val)  //  Chekc for higher priorities
+            {
+                p = temp;   //  Update
+                p->prior_val++; //  Lower priority
+
+                //  Make sure we dont go over 31
+                if(p->prior_val > P_MAX)
+                    p->prior_val = P_MAX;
+            }
+            else    //  For processes that havent been schdueled, increase their priority
+            {
+                p->prior_val--; //  Increase priorty
+
+                //  Stay in range
+                if(p->prior_val < P_MIN)
+                    p->prior_val = P_MIN;
+            }
+
+            temp = NULL;    //  Free temp process
+        }
+        else
+            continue;
+
+
+    }
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -403,7 +435,6 @@ scheduler(void)
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
-    }
     release(&ptable.lock);
 
   }
@@ -636,4 +667,25 @@ exitstat(int status)
     curproc->state = ZOMBIE;
     sched();
     panic("zombie exit");
+}
+
+int updateprior(int update)
+{
+    struct proc *curproc = myproc();    //  Get current process
+
+    acquire(&ptable.lock);  //  Make sure nothing else is modifying this process somewhere else
+
+    if(update < 1 || update > P_RANGE)   //  Make sure priority num is within range
+    {
+        cprintf("Priority must be in range from 1-31\n");
+        release(&ptable.lock);
+        return -1;
+    }
+
+    curproc->prior_val = update;    //  Update priority
+
+    release(&ptable.lock);  //  Release lock
+
+    return 0;
+
 }
