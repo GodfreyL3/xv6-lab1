@@ -415,7 +415,7 @@ scheduler(void)
                     p->prior_val = P_MIN;
             }
 
-            temp = NULL;    //  Free temp process
+            //temp = NULL;    //  Free temp process
         }
         else
             continue;
@@ -675,7 +675,7 @@ int updateprior(int update)
 
     acquire(&ptable.lock);  //  Make sure nothing else is modifying this process somewhere else
 
-    if(update < 1 || update > P_RANGE)   //  Make sure priority num is within range
+    if(update < P_MIN || update > P_MAX)   //  Make sure priority num is within range
     {
         cprintf("Priority must be in range from 1-31\n");
         release(&ptable.lock);
