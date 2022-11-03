@@ -7,8 +7,7 @@
 #include "proc.h"
 #include "spinlock.h"
 
-#define P_MAX 31
-#define P_MIN 1
+#define P_RANGE 31
 
 struct {
   struct spinlock lock;
@@ -92,7 +91,7 @@ found:
   p->state = EMBRYO;
   p->pid = nextpid++;
 
-  p->prior_val = -1;    //  Should be changed later down the line. Not sure what to init as yet
+  p->prior_val = 10;    //  Should be changed later down the line. Not sure what to init as yet
 
   release(&ptable.lock);
 
@@ -379,65 +378,72 @@ waitpid(int pid_find, int *status)
 void
 scheduler(void)
 {
-  struct proc *p;
-  struct cpu *c = mycpu();
-  c->proc = 0;
-  
-  for(;;){
-    // Enable interrupts on this processor.
-    sti();
+    struct proc *p;
+    struct cpu *c = mycpu();
+    c->proc = 0;
 
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
+    for(;;){
+        // Enable interrupts on this processor.
+        sti();
 
-    struct proc *temp;  //  Will hold highest order process
-    temp->prior_val = 99;   //  Will always be replaced by the first process looped over in ptable
+        struct proc *highProc;
 
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-        //  Filters out non-runnable processes and replaces if the proc priority is higher than temp's
-        if (p->state == RUNNABLE)
-        {
-            if(p->prior_val < temp->prior_val)  //  Chekc for higher priorities
+        // Loop over process table looking for process to run.
+        acquire(&ptable.lock);
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            if(p->state != RUNNABLE)
+                continue;
+
+            //  Assign highProc to chosen proc p
+            highProc = p;
+
+            struct proc *p1;
+
+            //  Find highest priority
+            for(p1 = ptable.proc; p1 < &ptable.proc[NPROC]; p1++)
             {
-                p = temp;   //  Update
-                p->prior_val++; //  Lower priority
-
-                //  Make sure we dont go over 31
-                if(p->prior_val > P_MAX)
-                    p->prior_val = P_MAX;
+                if(highProc->prior_val > p1->prior_val && p1->state == RUNNABLE)   //  FOund new highest priority
+                {
+                    if (highProc->prior_val >= 31)
+                        highProc->prior_val = 31;
+                    else
+                        highProc->prior_val--;
+                    highProc = p1;
+                }
+                else
+                {
+                    if(p1->prior_val >= 31)
+                        p1->prior_val = 31;
+                    else
+                        p1->prior_val--;
+                }
             }
-            else    //  For processes that havent been schdueled, increase their priority
-            {
-                p->prior_val--; //  Increase priorty
 
-                //  Stay in range
-                if(p->prior_val < P_MIN)
-                    p->prior_val = P_MIN;
-            }
+            //cprintf("Hello, this is %d with priority %d\n", highProc->pid, highProc->prior_val);
 
-            //temp = NULL;    //  Free temp process
+            // Switch to chosen process.  It is the process's job
+            // to release ptable.lock and then reacquire it
+            // before jumping back to us.
+            p = highProc;
+            if(p->prior_val <= 0)
+                p->prior_val = 0;
+            else
+                p->prior_val++;
+
+            c->proc = p;
+            switchuvm(p);
+            p->state = RUNNING;
+
+            swtch(&(c->scheduler), p->context);
+            switchkvm();
+
+            // Process is done running for now.
+            // It should have changed its p->state before coming back.
+            c->proc = 0;
         }
-        else
-            continue;
-
+        release(&ptable.lock);
 
     }
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    release(&ptable.lock);
-
-  }
 }
 
 // Enter scheduler.  Must hold only ptable.lock
@@ -675,12 +681,10 @@ int updateprior(int update)
 
     acquire(&ptable.lock);  //  Make sure nothing else is modifying this process somewhere else
 
-    if(update < P_MIN || update > P_MAX)   //  Make sure priority num is within range
-    {
-        cprintf("Priority must be in range from 1-31\n");
-        release(&ptable.lock);
-        return -1;
-    }
+    if(update < 0)
+        update = 0;
+    else if (update > 31)
+        update = 31;
 
     curproc->prior_val = update;    //  Update priority
 
