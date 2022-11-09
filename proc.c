@@ -220,6 +220,7 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  np->t_burst = 0;
 
   release(&ptable.lock);
 
@@ -386,7 +387,7 @@ scheduler(void)
         // Enable interrupts on this processor.
         sti();
 
-        struct proc *highProc;
+        struct proc *highProc;  // holds highes priority value
 
         // Loop over process table looking for process to run.
         acquire(&ptable.lock);
@@ -478,6 +479,7 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  myproc()->t_burst = ticks - myproc()->t_burst;
   sched();
   release(&ptable.lock);
 }
@@ -668,6 +670,11 @@ exitstat(int status)
                 wakeup1(initproc);
         }
     }
+
+    curproc->t_end = ticks;  //  Track ticks in exit;
+
+    cprintf("Turnaround: %d Ticks\n", curproc->t_end - curproc->t_start);
+    cprintf("Waiting: %d Ticks\n", (curproc->t_end - curproc->t_start) - curproc->t_burst);
 
     // Jump into the scheduler, never to return.
     curproc->state = ZOMBIE;

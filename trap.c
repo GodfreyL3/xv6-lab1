@@ -51,6 +51,15 @@ trap(struct trapframe *tf)
     if(cpuid() == 0){
       acquire(&tickslock);
       ticks++;
+
+//      if(myproc()->state == EMBRYO) //  Time spent in exec
+//          myproc()->t_start++;
+//      else if(myproc()->state == ZOMBIE)
+//          myproc()->t_end++;
+//      else if(myproc()->state == RUNNING)
+//          myproc()->t_burst++;
+
+
       wakeup(&ticks);
       release(&tickslock);
     }
