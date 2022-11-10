@@ -56,6 +56,7 @@ struct proc {
   int t_start;                 // Tracks CPU ticks in exec();
   int t_end;                   //   CPU ticks in exit();
   int t_burst;                 //   Ticks spent in RUNNING state
+  int t_burst_holder;          //   Helps calculate burst time
 };
 
 // Process memory is laid out contiguously, low addresses first:

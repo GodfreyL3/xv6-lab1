@@ -220,7 +220,10 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  np->t_start = ticks;
+  np->t_end = 0;
   np->t_burst = 0;
+  np->t_burst_holder = 0;
 
   release(&ptable.lock);
 
@@ -387,13 +390,20 @@ scheduler(void)
         // Enable interrupts on this processor.
         sti();
 
-        struct proc *highProc;  // holds highes priority value
+        struct proc *highProc;
 
         // Loop over process table looking for process to run.
         acquire(&ptable.lock);
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state != RUNNABLE)
+            {
+                if(p->prior_val <= 0)
+                    p->prior_val = 0;
+                else
+                    p->prior_val--;
                 continue;
+            }
+
 
             //  Assign highProc to chosen proc p
             highProc = p;
@@ -402,23 +412,9 @@ scheduler(void)
 
             //  Find highest priority
             for(p1 = ptable.proc; p1 < &ptable.proc[NPROC]; p1++)
-            {
-                if(highProc->prior_val > p1->prior_val && p1->state == RUNNABLE)   //  FOund new highest priority
-                {
-                    if (highProc->prior_val >= 31)
-                        highProc->prior_val = 31;
-                    else
-                        highProc->prior_val--;
+                if (highProc->prior_val > p1->prior_val && p1->state == RUNNABLE)   //  FOund new highest priority
                     highProc = p1;
-                }
-                else
-                {
-                    if(p1->prior_val >= 31)
-                        p1->prior_val = 31;
-                    else
-                        p1->prior_val--;
-                }
-            }
+
 
             //cprintf("Hello, this is %d with priority %d\n", highProc->pid, highProc->prior_val);
 
@@ -426,14 +422,16 @@ scheduler(void)
             // to release ptable.lock and then reacquire it
             // before jumping back to us.
             p = highProc;
-            if(p->prior_val <= 0)
-                p->prior_val = 0;
+            if(p->prior_val >= 31)
+                p->prior_val = 31;
             else
                 p->prior_val++;
 
             c->proc = p;
             switchuvm(p);
             p->state = RUNNING;
+
+            p->t_burst_holder = ticks;  //  get initial ticks from when running state starts
 
             swtch(&(c->scheduler), p->context);
             switchkvm();
@@ -479,7 +477,10 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
-  myproc()->t_burst = ticks - myproc()->t_burst;
+
+  //    get burst time by taking current ticks and subtracting ticks from when process was
+  //    first running
+  myproc()->t_burst += (ticks - myproc()->t_burst_holder);
   sched();
   release(&ptable.lock);
 }
@@ -675,6 +676,12 @@ exitstat(int status)
 
     cprintf("Turnaround: %d Ticks\n", curproc->t_end - curproc->t_start);
     cprintf("Waiting: %d Ticks\n", (curproc->t_end - curproc->t_start) - curproc->t_burst);
+
+
+    //  For debugging
+    //cprintf("Burst: %d Ticks\n", curproc->t_burst);
+    //cprintf("Start: %d Ticks\n", curproc->t_start);
+    //cprintf("End: %d Ticks\n", curproc->t_end);
 
     // Jump into the scheduler, never to return.
     curproc->state = ZOMBIE;
