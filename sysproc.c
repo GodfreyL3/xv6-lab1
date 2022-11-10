@@ -23,7 +23,18 @@ sys_exit(void)
 int
 sys_wait(void)
 {
-  return wait();
+
+    char *p;
+    int n = 0;
+    if(argptr(0, &p, n) < 0)
+        return -1;
+
+    int ret = wait((int*)p);
+
+    return ret;
+
+
+
 }
 
 int
@@ -104,8 +115,38 @@ sys_exitstat(void)
 
     if(argint(0, &status) < 0)
     {
-        exitstat(0);
+        exitstat(-1);
     }
     exitstat(status);
+    return 0;
+}
+
+int
+sys_waitpid(void)
+{
+
+    char *p;
+    int pid_find;
+    int n = 0;
+    if(argint(0, &pid_find) < 0 || argptr(1, &p, n) < 0)
+        return -1;
+
+    int ret = waitpid(pid_find, (int*)p);
+
+    return ret;
+
+
+
+}
+
+int sys_updateprior(void)
+{
+    int update;
+
+    if(argint(0, &update) < 0)
+    {
+        return -1;  //  Return -1 for unsuccessful
+    }
+    updateprior(update);
     return 0;
 }

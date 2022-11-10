@@ -1,0 +1,768 @@
+diff --git a/Makefile b/Makefile
+index 09d790c..a8df47e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -181,6 +181,7 @@ UPROGS=\
+ 	_usertests\
+ 	_wc\
+ 	_zombie\
++	_test\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+diff --git a/defs.h b/defs.h
+index 82fb982..fdbf0cc 100644
+--- a/defs.h
++++ b/defs.h
+@@ -117,9 +117,12 @@ void            sched(void);
+ void            setproc(struct proc*);
+ void            sleep(void*, struct spinlock*);
+ void            userinit(void);
+-int             wait(void);
++int             wait(int*);
+ void            wakeup(void*);
+ void            yield(void);
++void            hello(void);
++int             exitstat(int);
++int             waitpid(int, int*);
+ 
+ // swtch.S
+ void            swtch(struct context**, struct context*);
+diff --git a/forktest.c b/forktest.c
+index 8bc984d..d9930ba 100644
+--- a/forktest.c
++++ b/forktest.c
+@@ -33,15 +33,16 @@ forktest(void)
+     exit();
+   }
+ 
++  int stat = 0;
+   for(; n > 0; n--){
+-    if(wait() < 0){
+-      printf(1, "wait stopped early\n");
++    if(wait(&stat) < 0){
++      printf(1, "wait stopped early: %d\n", stat);
+       exit();
+     }
+   }
+ 
+-  if(wait() != -1){
+-    printf(1, "wait got too many\n");
++  if(wait(&stat) != -1){
++    printf(1, "wait got too many: %d\n", stat);
+     exit();
+   }
+ 
+diff --git a/hello.c b/hello.c
+new file mode 100644
+index 0000000..7e215e6
+--- /dev/null
++++ b/hello.c
+@@ -0,0 +1,11 @@
++//
++// Created by godfr on 9/27/2022.
++//
++#include "types.h"
++#include "user.h"
++
++int main(int argc, char **argv)
++{
++    printf(1, "hello cs153\n");
++    exit();
++}
+diff --git a/init.c b/init.c
+index 046b551..a3ac248 100644
+--- a/init.c
++++ b/init.c
+@@ -31,7 +31,9 @@ main(void)
+       printf(1, "init: exec sh failed\n");
+       exit();
+     }
+-    while((wpid=wait()) >= 0 && wpid != pid)
+-      printf(1, "zombie!\n");
++
++    int status = 0;
++    while((wpid=wait(&status)) >= 0 && wpid != pid)
++      printf(1, "zombie! %d\n", status);
+   }
+ }
+diff --git a/proc.c b/proc.c
+index 806b1b1..0b4afab 100644
+--- a/proc.c
++++ b/proc.c
+@@ -270,7 +270,7 @@ exit(void)
+ // Wait for a child process to exit and return its pid.
+ // Return -1 if this process has no children.
+ int
+-wait(void)
++wait(int *status)
+ {
+   struct proc *p;
+   int havekids, pid;
+@@ -280,16 +280,21 @@ wait(void)
+   for(;;){
+     // Scan through table looking for exited children.
+     havekids = 0;
+-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){ //  Looks through all children and checks for zombies
+       if(p->parent != curproc)
+         continue;
+       havekids = 1;
+       if(p->state == ZOMBIE){
+         // Found one.
+         pid = p->pid;
++
++        *status = p->status;
++
++
+         kfree(p->kstack);
+         p->kstack = 0;
+         freevm(p->pgdir);
++
+         p->pid = 0;
+         p->parent = 0;
+         p->name[0] = 0;
+@@ -311,6 +316,53 @@ wait(void)
+   }
+ }
+ 
++int
++waitpid(int pid_find, int *status)
++{
++    struct proc *p;
++    int match_p, pid;
++    struct proc *curproc = myproc();
++
++    acquire(&ptable.lock);
++    for(;;){
++
++        match_p = 0;
++        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){ //  Looks through all children and checks for zombies
++            if(p->state == ZOMBIE && p->pid == pid_find){
++                // Found matching pid
++                match_p = 1;
++                pid = p->pid;
++
++                *status = p->status;
++
++                cprintf("child p-status: %d\n", p->status);
++
++
++                kfree(p->kstack);
++                p->kstack = 0;
++                freevm(p->pgdir);
++
++                p->pid = 0;
++                p->parent = 0;
++                p->name[0] = 0;
++                p->killed = 0;
++                p->state = UNUSED;
++                release(&ptable.lock);
++                return pid;
++            }
++        }
++
++        // No point waiting if we don't have any children.
++        if(curproc->killed && match_p){
++            release(&ptable.lock);
++            return -1;
++        }
++
++        // Wait for children to exit.  (See wakeup1 call in proc_exit.)
++        sleep(curproc, &ptable.lock);  //DOC: wait-sleep
++    }
++}
++
+ //PAGEBREAK: 42
+ // Per-CPU process scheduler.
+ // Each CPU calls scheduler() after setting itself up.
+@@ -532,3 +584,54 @@ procdump(void)
+     cprintf("\n");
+   }
+ }
++
++void
++hello(void)
++{
++    cprintf("\n\n Hello from your kernel space! \n\n");
++}
++
++int
++exitstat(int status)
++{
++    struct proc *curproc = myproc();
++    struct proc *p;
++    int fd;
++
++    curproc->status = status;   //  Store status num
++
++    if(curproc == initproc)
++        panic("init exiting");
++
++    // Close all open files.
++    for(fd = 0; fd < NOFILE; fd++){
++        if(curproc->ofile[fd]){
++            fileclose(curproc->ofile[fd]);
++            curproc->ofile[fd] = 0;
++        }
++    }
++
++    begin_op();
++    iput(curproc->cwd);
++    end_op();
++    curproc->cwd = 0;
++
++    acquire(&ptable.lock);
++
++    // Parent might be sleeping in wait().
++    wakeup1(curproc->parent);
++
++    // Pass abandoned children to init.
++    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++        if(p->parent == curproc){
++            p->parent = initproc;
++            if(p->state == ZOMBIE)
++                wakeup1(initproc);
++        }
++    }
++
++    // Jump into the scheduler, never to return.
++    curproc->state = ZOMBIE;
++    sched();
++    panic("zombie exit");
++}
+diff --git a/proc.h b/proc.h
+index 1647114..21e52a0 100644
+--- a/proc.h
++++ b/proc.h
+@@ -49,6 +49,8 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++
++  int status;
+ };
+ 
+ // Process memory is laid out contiguously, low addresses first:
+diff --git a/sh.c b/sh.c
+index 054bab9..77cc3cd 100644
+--- a/sh.c
++++ b/sh.c
+@@ -93,7 +93,8 @@ runcmd(struct cmd *cmd)
+     lcmd = (struct listcmd*)cmd;
+     if(fork1() == 0)
+       runcmd(lcmd->left);
+-    wait();
++    int status = 0;
++    wait(&status);
+     runcmd(lcmd->right);
+     break;
+ 
+@@ -117,8 +118,8 @@ runcmd(struct cmd *cmd)
+     }
+     close(p[0]);
+     close(p[1]);
+-    wait();
+-    wait();
++    wait(&status);
++    wait(&status);
+     break;
+ 
+   case BACK:
+@@ -146,6 +147,7 @@ main(void)
+ {
+   static char buf[100];
+   int fd;
++  int status = 0;
+ 
+   // Ensure that three file descriptors are open.
+   while((fd = open("console", O_RDWR)) >= 0){
+@@ -166,7 +168,7 @@ main(void)
+     }
+     if(fork1() == 0)
+       runcmd(parsecmd(buf));
+-    wait();
++    wait(&status);
+   }
+   exit();
+ }
+diff --git a/stressfs.c b/stressfs.c
+index c0a4743..8b1d325 100644
+--- a/stressfs.c
++++ b/stressfs.c
+@@ -43,7 +43,8 @@ main(int argc, char *argv[])
+     read(fd, data, sizeof(data));
+   close(fd);
+ 
+-  wait();
++  int stat = 0;
++  wait(&stat);
+ 
+   exit();
+ }
+diff --git a/syscall.c b/syscall.c
+index ee85261..b66509b 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -103,6 +103,9 @@ extern int sys_unlink(void);
+ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
++extern int sys_hello(void);
++extern int sys_exitstat(void);
++extern int sys_waitpid(void);
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -126,6 +129,9 @@ static int (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_hello]   sys_hello,
++[SYS_exitstat]   sys_exitstat,
++[SYS_waitpid]   sys_waitpid,
+ };
+ 
+ void
+diff --git a/syscall.h b/syscall.h
+index bc5f356..027e8bd 100644
+--- a/syscall.h
++++ b/syscall.h
+@@ -20,3 +20,6 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_hello  22
++#define SYS_exitstat  23
++#define SYS_waitpid  24
+diff --git a/sysproc.c b/sysproc.c
+index 0686d29..49b8637 100644
+--- a/sysproc.c
++++ b/sysproc.c
+@@ -23,7 +23,18 @@ sys_exit(void)
+ int
+ sys_wait(void)
+ {
+-  return wait();
++
++    char *p;
++    int n = 0;
++    if(argptr(0, &p, n) < 0)
++        return -1;
++
++    int ret = wait((int*)p);
++
++    return ret;
++
++
++
+ }
+ 
+ int
+@@ -89,3 +100,41 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
++
++int
++sys_hello(void)
++{
++    hello();
++    return 0;
++}
++
++int
++sys_exitstat(void)
++{
++    int status;
++
++    if(argint(0, &status) < 0)
++    {
++        exitstat(-1);
++    }
++    exitstat(status);
++    return 0;
++}
++
++int
++sys_waitpid(void)
++{
++
++    char *p;
++    int pid_find;
++    int n = 0;
++    if(argint(0, &pid_find) < 0 || argptr(1, &p, n) < 0)
++        return -1;
++
++    int ret = waitpid(pid_find, (int*)p);
++
++    return ret;
++
++
++
++}
+\ No newline at end of file
+diff --git a/test.c b/test.c
+new file mode 100644
+index 0000000..cb3a27d
+--- /dev/null
++++ b/test.c
+@@ -0,0 +1,104 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++#define WNOHANG 	1
++
++int main(int argc, char *argv[])
++{
++
++    int exitWait(void);
++    int waitPid(void);
++
++    printf(1, "\n This program tests the correctness of your lab#1\n");
++
++    if (atoi(argv[1]) == 1)
++        exitWait();
++    else if (atoi(argv[1]) == 2)
++        waitPid();
++    else
++        printf(1, "\ntype \"%s 1\" to test exit and wait, \"%s 2\" to test waitpid\n", argv[0], argv[0]);
++
++    // End of test
++    exitstat(0);
++    return 0;
++}
++
++int exitWait(void) {
++    int pid, ret_pid, exit_status;
++    int i;
++    // use this part to test exitstat(int status) and wait(int* status)
++
++    printf(1, "\n  Parts a & b) testing exitstat(int status) and wait(int* status):\n");
++
++    for (i = 0; i < 2; i++) {
++        pid = fork();
++        if (pid == 0) { // only the child executed this code
++            if (i == 0){
++                printf(1, "\nThis is child with PID# %d and I will exit with status %d\n", getpid(), 0);
++                exitstat(0);
++            }
++            else{
++                printf(1, "\nThis is child with PID# %d and I will exit with status %d\n" ,getpid(), -1);
++                exitstat(-1);
++            }
++        } else if (pid > 0) { // only the parent executes this code
++            ret_pid = wait(&exit_status);
++            printf(1, "\n This is the parent: child with PID# %d has exited with status %d\n", ret_pid, exit_status);
++        } else { // something went wrong with fork system call
++            printf(2, "\nError using fork\n");
++            exitstat(-1);
++        }
++    }
++    return 0;
++}
++
++int waitPid(void){
++
++    int ret_pid, exit_status;
++    int i;
++    int pid_a[5]={0, 0, 0, 0, 0};
++    // use this part to test wait(int pid, int* status, int options)
++
++    printf(1, "\n  Part c) testing waitpid(int pid, int* status, int options):\n");
++
++    for (i = 0; i <5; i++) {
++        pid_a[i] = fork();
++        if (pid_a[i] == 0) { // only the child executed this code
++            printf(1, "\n This is child with PID# %d and I will exit with status %d\n", getpid(), getpid() + 4);
++            exitstat(getpid() + 4);
++        }
++    }
++    sleep(5);
++    printf(1, "\n This is the parent: Now waiting for child with PID# %d\n",pid_a[3]);
++    ret_pid = waitpid(pid_a[3], &exit_status);
++    printf(1, "\n This is the partent: Child# %d has exited with status %d, expected: %d\n",ret_pid, exit_status, pid_a[3] + 4);
++    sleep(5);
++    printf(1, "\n This is the parent: Now waiting for child with PID# %d\n",pid_a[1]);
++    ret_pid = waitpid(pid_a[1], &exit_status);
++    printf(1, "\n This is the parent: Child# %d has exited with status %d, expected: %d\n",ret_pid, exit_status, pid_a[1] + 4);
++    sleep(5);
++    printf(1, "\n This is the parent: Now waiting for child with PID# %d\n",pid_a[2]);
++    ret_pid = waitpid(pid_a[2], &exit_status);
++    printf(1, "\n This is the partent: Child# %d has exited with status %d, expected: %d\n",ret_pid, exit_status, pid_a[2] + 4);
++    sleep(5);
++    printf(1, "\n This is the parent: Now waiting for child with PID# %d\n",pid_a[0]);
++    ret_pid = waitpid(pid_a[0], &exit_status);
++    printf(1, "\n This is the partent: Child# %d has exited with status %d, expected: %d\n",ret_pid, exit_status, pid_a[0] + 4);
++    sleep(5);
++    printf(1, "\n This is the parent: Now waiting for child with PID# %d\n",pid_a[4]);
++    ret_pid = waitpid(pid_a[4], &exit_status);
++    printf(1, "\n This is the parent: Child# %d has exited with status %d, expected: %d\n",ret_pid, exit_status, pid_a[4] + 4);
++
++
++    printf(1, "\n This is the parent: Now try to wait for a invalid Number, this should not get stuck..\n");
++    ret_pid = waitpid(9999, &exit_status);
++    printf(1, "\n This is the parent: Child# 9999 has ret code %d, expected: -1\n",ret_pid);
++    //printf(1, "\n This is the parent: Child# %d has exited with status %d\n",ret_pid, exit_status);
++
++    printf(1, "\n This is the parent: Now try to give invalid argument.\n");
++    ret_pid = waitpid(9999, (int*) 0xffffffff);
++    printf(1, "\n This is the parent: Got ret code %d, expected: -1\n",ret_pid);
++
++    return 0;
++}
+\ No newline at end of file
+diff --git a/user.h b/user.h
+index 4f99c52..1a029c0 100644
+--- a/user.h
++++ b/user.h
+@@ -4,7 +4,7 @@ struct rtcdate;
+ // system calls
+ int fork(void);
+ int exit(void) __attribute__((noreturn));
+-int wait(void);
++int wait(int*);
+ int pipe(int*);
+ int write(int, const void*, int);
+ int read(int, void*, int);
+@@ -23,6 +23,10 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++int hello(void);    //  J.H.
++int exitstat(int);  //  Lab 1 Part A
++int waitpid(int, int*);  //  Lab 1 Part C
++
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/usertests.c b/usertests.c
+index a1e97e7..3698d42 100644
+--- a/usertests.c
++++ b/usertests.c
+@@ -66,7 +66,8 @@ exitiputtest(void)
+     }
+     exit();
+   }
+-  wait();
++  int stat = 0;
++  wait(&stat);
+   printf(stdout, "exitiput test ok\n");
+ }
+ 
+@@ -109,7 +110,8 @@ openiputtest(void)
+     printf(stdout, "unlink failed\n");
+     exit();
+   }
+-  wait();
++  int stat = 0;
++  wait(&stat);
+   printf(stdout, "openiput test ok\n");
+ }
+ 
+@@ -346,7 +348,8 @@ pipe1(void)
+       exit();
+     }
+     close(fds[0]);
+-    wait();
++    int stat = 0;
++    wait(&stat);
+   } else {
+     printf(1, "fork() failed\n");
+     exit();
+@@ -394,9 +397,10 @@ preempt(void)
+   kill(pid2);
+   kill(pid3);
+   printf(1, "wait... ");
+-  wait();
+-  wait();
+-  wait();
++  int stat = 0;
++  wait(&stat);
++  wait(&stat);
++  wait(&stat);
+   printf(1, "preempt ok\n");
+ }
+ 
+@@ -413,7 +417,8 @@ exitwait(void)
+       return;
+     }
+     if(pid){
+-      if(wait() != pid){
++        int stat = 0;
++      if(wait(&stat) != pid){
+         printf(1, "wait wrong pid\n");
+         return;
+       }
+@@ -453,7 +458,8 @@ mem(void)
+     printf(1, "mem ok\n");
+     exit();
+   } else {
+-    wait();
++      int stat;
++      wait(&stat);
+   }
+ }
+ 
+@@ -486,7 +492,10 @@ sharedfd(void)
+   if(pid == 0)
+     exit();
+   else
+-    wait();
++  {
++      int stat = 0;
++      wait(&stat);
++  }
+   close(fd);
+   fd = open("sharedfd", 0);
+   if(fd < 0){
+@@ -552,7 +561,8 @@ fourfiles(void)
+   }
+ 
+   for(pi = 0; pi < 4; pi++){
+-    wait();
++    int stat = 0;
++wait(&stat);
+   }
+ 
+   for(i = 0; i < 2; i++){
+@@ -620,7 +630,8 @@ createdelete(void)
+   }
+ 
+   for(pi = 0; pi < 4; pi++){
+-    wait();
++    int stat = 0;
++wait(&stat);
+   }
+ 
+   name[0] = name[1] = name[2] = 0;
+@@ -791,10 +802,12 @@ concreate(void)
+       }
+       close(fd);
+     }
++
++    int stat = 0;
+     if(pid == 0)
+       exit();
+     else
+-      wait();
++      wait(&stat);
+   }
+ 
+   memset(fa, 0, sizeof(fa));
+@@ -843,10 +856,12 @@ concreate(void)
+       unlink(file);
+       unlink(file);
+     }
++
++    int stat = 0;
+     if(pid == 0)
+       exit();
+     else
+-      wait();
++      wait(&stat);
+   }
+ 
+   printf(1, "concreate ok\n");
+@@ -880,8 +895,9 @@ linkunlink()
+     }
+   }
+ 
++  int stat = 0;
+   if(pid)
+-    wait();
++    wait(&stat);
+   else
+     exit();
+ 
+@@ -1396,14 +1412,16 @@ forktest(void)
+     exit();
+   }
+ 
++  int status = 0;
+   for(; n > 0; n--){
+-    if(wait() < 0){
++    if(wait(&status) < 0){
+       printf(1, "wait stopped early\n");
+       exit();
+     }
+   }
+ 
+-  if(wait() != -1){
++  int stat = 0;
++  if(wait(&stat) != -1){
+     printf(1, "wait got too many\n");
+     exit();
+   }
+@@ -1446,7 +1464,8 @@ sbrktest(void)
+   }
+   if(pid == 0)
+     exit();
+-  wait();
++  int stat = 0;
++wait(&stat);
+ 
+   // can one grow address space to something big?
+ #define BIG (100*1024*1024)
+@@ -1506,7 +1525,8 @@ sbrktest(void)
+       kill(ppid);
+       exit();
+     }
+-    wait();
++    int stat = 0;
++wait(&stat);
+   }
+ 
+   // if we run the system out of memory, does it clean up the last
+@@ -1533,7 +1553,8 @@ sbrktest(void)
+     if(pids[i] == -1)
+       continue;
+     kill(pids[i]);
+-    wait();
++    int stat = 0;
++wait(&stat);
+   }
+   if(c == (char*)0xffffffff){
+     printf(stdout, "failed sbrk leaked memory\n");
+@@ -1577,7 +1598,8 @@ validatetest(void)
+     sleep(0);
+     sleep(0);
+     kill(pid);
+-    wait();
++    int stat = 0;
++wait(&stat);
+ 
+     // try to crash the kernel by passing in a bad string pointer
+     if(link("nosuchfile", (char*)p) != -1){
+@@ -1632,7 +1654,8 @@ bigargtest(void)
+     printf(stdout, "bigargtest: fork failed\n");
+     exit();
+   }
+-  wait();
++  int stat = 0;
++wait(&stat);
+   fd = open("bigarg-ok", 0);
+   if(fd < 0){
+     printf(stdout, "bigarg test failed!\n");
+@@ -1720,7 +1743,8 @@ uio()
+     printf (1, "fork failed\n");
+     exit();
+   }
+-  wait();
++  int stat = 0;
++wait(&stat);
+   printf(1, "uio test done\n");
+ }
+ 
+diff --git a/usys.S b/usys.S
+index 8bfd8a1..acd5519 100644
+--- a/usys.S
++++ b/usys.S
+@@ -29,3 +29,6 @@ SYSCALL(getpid)
+ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
++SYSCALL(hello)
++SYSCALL(exitstat)
++SYSCALL(waitpid)
