@@ -36,6 +36,9 @@ idtinit(void)
 void
 trap(struct trapframe *tf)
 {
+    uint fault;
+    struct proc *curProc;
+
   if(tf->trapno == T_SYSCALL){
     if(myproc()->killed)
       exit();
@@ -78,7 +81,18 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+    case T_PGFLT:
+        cprintf("Stack size increased....\n");
+        //  rcr2 returns the value in control register 2, which is the address that program tried to access and called a fault
+        fault = rcr2();
+        curProc = myproc();    //  Gte current process
 
+        //  gte current process' page table
+        pde_t *pgdir = curProc->pgdir;
+
+        //  allocate new page
+        allocuvm(pgdir, PGROUNDDOWN(fault), fault);
+        break;
   //PAGEBREAK: 13
   default:
     if(myproc() == 0 || (tf->cs&3) == 0){

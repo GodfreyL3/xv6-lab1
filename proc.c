@@ -674,12 +674,13 @@ exitstat(int status)
 
     curproc->t_end = ticks;  //  Track ticks in exit;
 
-    cprintf("Turnaround: %d Ticks\n", curproc->t_end - curproc->t_start);
-    cprintf("Waiting: %d Ticks\n", (curproc->t_end - curproc->t_start) - curproc->t_burst);
+//    cprintf("Turnaround: %d Ticks\n", curproc->t_end - curproc->t_start);
+//    cprintf("Waiting: %d Ticks\n", (curproc->t_end - curproc->t_start) - curproc->t_burst);
 
 
     //  For debugging
-    //cprintf("Burst: %d Ticks\n", curproc->t_burst);
+    // cprintf("PID %d finished with priority %d", curproc->pid, curproc->prior_val);
+    // cprintf("Burst: %d Ticks\n", curproc->t_burst);
     //cprintf("Start: %d Ticks\n", curproc->t_start);
     //cprintf("End: %d Ticks\n", curproc->t_end);
 
