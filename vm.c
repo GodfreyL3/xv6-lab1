@@ -340,8 +340,8 @@ copyuvm(pde_t *pgdir, uint sz)
         }
     }
 
-    //Skip to top of user stack, and go to STACKTOP
-    for(i = myproc()->top_user_stack; i < STACKTOP; i += PGSIZE){
+    //Skip to top of user stack, and go to USERBOUND
+    for(i = myproc()->top_user_stack; i < USERBOUND; i += PGSIZE){
         if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
             panic("copyuvm: pte should exist");
         if(!(*pte & PTE_P))

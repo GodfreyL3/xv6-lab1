@@ -19,7 +19,7 @@ fetchint(uint addr, int *ip)
 {
 
     //  curproc()->sz not needed anymore as we are not growing our user stack opposite of the heap
-    if(addr >= STACKTOP)    //  If address is above the STACKTOP, it is out of rnage and returns -1
+    if(addr >= USERBOUND)    //  If address is above the USERBOUND, it is out of rnage and returns -1
         return -1;
 
     // otherwise fetch int, return 0 for success.
@@ -35,12 +35,12 @@ fetchstr(uint addr, char **pp)
 {
   char *s, *ep;
 
-    if(addr >= STACKTOP)    //  If address is above the STACKTOP, it is out of rnage and returns -1
+    if(addr >= USERBOUND)    //  If address is above the USERBOUND, it is out of rnage and returns -1
         return -1;
 
 
   *pp = (char*)addr;
-  ep = (char*)STACKTOP;
+  ep = (char*)USERBOUND;
   for(s = *pp; s < ep; s++){
     if(*s == 0)
       return s - *pp;
@@ -67,8 +67,8 @@ argptr(int n, char **pp, int size)
   if(argint(n, &i) < 0)
     return -1;
 
-  //    Replace sz with STACKTOP, where we are growing from the top boundary rather than sz
-  if(size < 0 || (uint)i >= STACKTOP || (uint)i+size > STACKTOP)
+  //    Replace sz with USERBOUND, where we are growing from the top boundary rather than sz
+  if(size < 0 || (uint)i >= USERBOUND || (uint)i+size > USERBOUND)
     return -1;
   *pp = (char*)i;
   return 0;
